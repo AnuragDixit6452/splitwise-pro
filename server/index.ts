@@ -105,7 +105,28 @@ app.post('/api/reset', requireAuth, requireDb, async (_req, res) => {
 });
 
 if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath, { index: false }));
+  app.use(
+    '/assets',
+    express.static(path.join(distPath, 'assets'), {
+      index: false,
+      fallthrough: false,
+      setHeaders(res) {
+        // Vite tags assets with crossorigin; allow same-origin CORS apply.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    }),
+  );
+  app.use(
+    express.static(distPath, {
+      index: false,
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+      },
+    }),
+  );
 }
 
 app.get('/', (_req, res) => {
@@ -116,11 +137,12 @@ app.get('/', (_req, res) => {
       .send('Frontend build missing (dist/index.html). Check the Docker build logs.');
     return;
   }
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(indexHtml);
 });
 
 app.use((req, res, next) => {
-  if (req.method !== 'GET' || req.path.startsWith('/api/')) {
+  if (req.method !== 'GET' || req.path.startsWith('/api/') || req.path.startsWith('/assets/')) {
     next();
     return;
   }
@@ -128,6 +150,7 @@ app.use((req, res, next) => {
     res.status(404).type('text').send('Not Found');
     return;
   }
+  res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(indexHtml);
 });
 
