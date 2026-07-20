@@ -22,7 +22,9 @@ import {
   TrendingUp,
   Receipt,
   FileSpreadsheet,
-  Pencil
+  Pencil,
+  Search,
+  Eye
 } from 'lucide-react';
 import { Group, Member, Expense, Settlement, Session } from './types';
 import { 
@@ -55,6 +57,7 @@ export default function App() {
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [viewingExpense, setViewingExpense] = useState<Expense | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   // New entry states
@@ -79,6 +82,10 @@ export default function App() {
 
   // Mobile section tabs (desktop shows all columns)
   const [mobileTab, setMobileTab] = useState<'people' | 'ledger' | 'settle'>('ledger');
+
+  // List search filters
+  const [memberSearch, setMemberSearch] = useState('');
+  const [settlementSearch, setSettlementSearch] = useState('');
 
   // Feedback notifications
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -291,6 +298,7 @@ export default function App() {
       return;
     }
 
+    setViewingExpense(null);
     setEditingExpenseId(expense.id);
     setExpenseTitle(expense.title);
     setExpenseAmount(String(expense.amount));
@@ -305,6 +313,17 @@ export default function App() {
     });
     setExpenseShares(initialShares);
     setShowAddExpenseModal(true);
+  };
+
+  const getMemberShareAmount = (expense: Expense, memberId: string): number => {
+    if (!expense.splitWithIds.includes(memberId)) return 0;
+    if (expense.splitType === 'unequal') {
+      return expense.shares[memberId] || 0;
+    }
+    if (expense.splitType === 'percentage') {
+      return (expense.amount * (expense.shares[memberId] || 0)) / 100;
+    }
+    return expense.amount / Math.max(expense.splitWithIds.length, 1);
   };
 
   const handleSaveExpense = (e: React.FormEvent) => {
@@ -534,6 +553,23 @@ export default function App() {
   // Balances and settlements on the fly
   const currentBalances = calculateBalances(activeGroupMembers, activeGroupExpenses);
   const optimalSettlements = simplifyDebts(currentBalances);
+
+  const memberQuery = memberSearch.trim().toLowerCase();
+  const filteredMembers = memberQuery
+    ? activeGroupMembers.filter((m) => m.name.toLowerCase().includes(memberQuery))
+    : activeGroupMembers;
+
+  const settlementQuery = settlementSearch.trim().toLowerCase();
+  const filteredSettlements = settlementQuery
+    ? optimalSettlements.filter((settlement) => {
+        const fromName = activeGroupMembers.find((m) => m.id === settlement.fromId)?.name ?? '';
+        const toName = activeGroupMembers.find((m) => m.id === settlement.toId)?.name ?? '';
+        return (
+          fromName.toLowerCase().includes(settlementQuery) ||
+          toName.toLowerCase().includes(settlementQuery)
+        );
+      })
+    : optimalSettlements;
 
   // Total expenses overall
   const totalExpensesSum = activeGroupExpenses.reduce((acc, exp) => acc + exp.amount, 0);
@@ -782,51 +818,68 @@ export default function App() {
               ) : activeGroupMembers.length === 0 ? (
                 <p className="text-[11px] text-slate-500 font-bold text-center py-6 uppercase">No members yet</p>
               ) : (
-                <div className="space-y-2.5 max-h-[min(380px,50vh)] lg:max-h-[380px] overflow-y-auto overflow-x-hidden pr-1 min-w-0">
-                  {activeGroupMembers.map((m) => {
-                    const bal = currentBalances[m.id] || 0;
-                    const isCreditor = bal > 0.01;
-                    const isDebtor = bal < -0.01;
-                    
-                    return (
-                      <div
-                        key={m.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, m.id)}
-                        className="p-2 border-2 border-black bg-white flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing hover:bg-slate-50 transition-all relative group min-w-0 max-w-full"
-                        title="Drag me into the Sandbox zone on the right side!"
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                          <div 
-                            className="w-6 h-6 border-2 border-black flex items-center justify-center font-bold text-xs shrink-0"
-                            style={{ backgroundColor: m.avatarBgColor }}
+                <>
+                  <div className="relative mb-2.5">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" strokeWidth={2.5} />
+                    <input
+                      type="search"
+                      value={memberSearch}
+                      onChange={(e) => setMemberSearch(e.target.value)}
+                      placeholder="Search members…"
+                      className="w-full pl-8 pr-2 py-2 border-2 border-black bg-slate-50 text-xs font-bold text-black focus:outline-none focus:bg-white"
+                      aria-label="Search members"
+                    />
+                  </div>
+                  <div className="space-y-2.5 max-h-[min(380px,50vh)] lg:max-h-[380px] overflow-y-auto overflow-x-hidden pr-1 min-w-0">
+                    {filteredMembers.length === 0 ? (
+                      <p className="text-[11px] text-slate-500 font-bold text-center py-4 uppercase">No members match “{memberSearch.trim()}”</p>
+                    ) : (
+                      filteredMembers.map((m) => {
+                        const bal = currentBalances[m.id] || 0;
+                        const isCreditor = bal > 0.01;
+                        const isDebtor = bal < -0.01;
+                        
+                        return (
+                          <div
+                            key={m.id}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, m.id)}
+                            className="p-2 border-2 border-black bg-white flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing hover:bg-slate-50 transition-all relative group min-w-0 max-w-full"
+                            title="Drag me into the Sandbox zone on the right side!"
                           >
-                            {m.avatarEmoji}
+                            <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                              <div 
+                                className="w-6 h-6 border-2 border-black flex items-center justify-center font-bold text-xs shrink-0"
+                                style={{ backgroundColor: m.avatarBgColor }}
+                              >
+                                {m.avatarEmoji}
+                              </div>
+                              <span className="text-sm font-bold italic truncate text-black min-w-0">{m.name}</span>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className={`text-[11px] sm:text-xs font-black block tabular-nums ${
+                                isCreditor ? 'text-[#22c55e]' : isDebtor ? 'text-[#F472B6]' : 'text-slate-400'
+                              }`}>
+                                {isCreditor ? `+₹${bal.toFixed(0)}` : isDebtor ? `-₹${Math.abs(bal).toFixed(0)}` : '₹0'}
+                              </span>
+                            </div>
+
+                            {!expenses.some(e => e.groupId === activeGroupId && (e.paidById === m.id || e.splitWithIds.includes(m.id))) && (
+                              <button
+                                onClick={() => handleDeleteMember(m.id)}
+                                className="absolute top-1 right-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1 lg:p-0.5 bg-[#F472B6] text-black border border-black text-[8px] font-black cursor-pointer"
+                                title="Remove member"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            )}
                           </div>
-                          <span className="text-sm font-bold italic truncate text-black min-w-0">{m.name}</span>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className={`text-[11px] sm:text-xs font-black block tabular-nums ${
-                            isCreditor ? 'text-[#22c55e]' : isDebtor ? 'text-[#F472B6]' : 'text-slate-400'
-                          }`}>
-                            {isCreditor ? `+₹${bal.toFixed(0)}` : isDebtor ? `-₹${Math.abs(bal).toFixed(0)}` : '₹0'}
-                          </span>
-                        </div>
-
-                        {!expenses.some(e => e.groupId === activeGroupId && (e.paidById === m.id || e.splitWithIds.includes(m.id))) && (
-                          <button
-                            onClick={() => handleDeleteMember(m.id)}
-                            className="absolute top-1 right-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1 lg:p-0.5 bg-[#F472B6] text-black border border-black text-[8px] font-black cursor-pointer"
-                            title="Remove member"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </aside>
@@ -904,6 +957,14 @@ export default function App() {
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setViewingExpense(exp)}
+                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#FDE047] hover:bg-[#FDE047]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                title="View expense details"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditExpense(exp)}
@@ -1004,7 +1065,7 @@ export default function App() {
 
             {/* Settlement Status (Optimal Settle) Card */}
             <div className="bg-[#60A5FA] border-4 border-black p-4 shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] sm:shadow-[6px_6px_0px_0px_rgba(0,0,0,1)] text-black flex flex-col max-w-full min-w-0">
-              <h2 className="text-xs font-black uppercase mb-4 tracking-widest text-black">Settlement Status</h2>
+              <h2 className="text-xs font-black uppercase mb-3 tracking-widest text-black">Settlement Status</h2>
               
               {!activeGroup ? (
                 <p className="text-xs font-bold text-center py-4 uppercase text-black/75">Select group</p>
@@ -1014,40 +1075,59 @@ export default function App() {
                   <p className="text-xs font-black uppercase">All debts settled!</p>
                 </div>
               ) : (
-                <div className="space-y-3 overflow-y-auto max-h-[300px] pr-1">
-                  {optimalSettlements.map((settlement, idx) => {
-                    const fromMem = activeGroupMembers.find(m => m.id === settlement.fromId);
-                    const toMem = activeGroupMembers.find(m => m.id === settlement.toId);
-
-                    if (!fromMem || !toMem) return null;
-
-                    return (
-                      <div key={idx} className="bg-white p-3 border-2 border-black flex flex-col gap-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] relative">
-                        <div className="flex items-center justify-between text-[10px] font-black uppercase text-slate-500 leading-none">
-                          <span>OWES</span>
-                          <span>RECEIVES</span>
-                        </div>
-                        
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="font-bold text-xs text-black truncate italic">{fromMem.name}</span>
-                          <ArrowRight className="w-3 h-3 text-black shrink-0" />
-                          <span className="font-bold text-xs text-black truncate italic">{toMem.name}</span>
-                        </div>
-
-                        <div className="flex items-center justify-between border-t border-black/10 pt-2 mt-1">
-                          <span className="font-black text-lg text-black">₹{settlement.amount.toFixed(0)}</span>
-                          <button
-                            onClick={() => handleLogSettlement(settlement.fromId, settlement.toId, settlement.amount)}
-                            className="bg-[#4ADE80] border-2 border-black px-2 py-0.5 text-[9px] font-black uppercase hover:bg-[#4ADE80]/90 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] cursor-pointer text-black"
-                            title="Log settlement payment"
-                          >
-                            SETTLE
-                          </button>
-                        </div>
+                <>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 pointer-events-none" strokeWidth={2.5} />
+                    <input
+                      type="search"
+                      value={settlementSearch}
+                      onChange={(e) => setSettlementSearch(e.target.value)}
+                      placeholder="Search by name…"
+                      className="w-full pl-8 pr-2 py-2 border-2 border-black bg-white text-xs font-bold text-black focus:outline-none focus:bg-[#FDE047]/20"
+                      aria-label="Search settlements"
+                    />
+                  </div>
+                  <div className="space-y-3 overflow-y-auto max-h-[300px] pr-1">
+                    {filteredSettlements.length === 0 ? (
+                      <div className="bg-white p-3 border-2 border-black text-center">
+                        <p className="text-[11px] font-black uppercase text-slate-500">No settlements match “{settlementSearch.trim()}”</p>
                       </div>
-                    );
-                  })}
-                </div>
+                    ) : (
+                      filteredSettlements.map((settlement, idx) => {
+                        const fromMem = activeGroupMembers.find(m => m.id === settlement.fromId);
+                        const toMem = activeGroupMembers.find(m => m.id === settlement.toId);
+
+                        if (!fromMem || !toMem) return null;
+
+                        return (
+                          <div key={`${settlement.fromId}-${settlement.toId}-${idx}`} className="bg-white p-3 border-2 border-black flex flex-col gap-2 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] relative">
+                            <div className="flex items-center justify-between text-[10px] font-black uppercase text-slate-500 leading-none">
+                              <span>OWES</span>
+                              <span>RECEIVES</span>
+                            </div>
+                            
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-bold text-xs text-black truncate italic">{fromMem.name}</span>
+                              <ArrowRight className="w-3 h-3 text-black shrink-0" />
+                              <span className="font-bold text-xs text-black truncate italic">{toMem.name}</span>
+                            </div>
+
+                            <div className="flex items-center justify-between border-t border-black/10 pt-2 mt-1">
+                              <span className="font-black text-lg text-black">₹{settlement.amount.toFixed(0)}</span>
+                              <button
+                                onClick={() => handleLogSettlement(settlement.fromId, settlement.toId, settlement.amount)}
+                                className="bg-[#4ADE80] border-2 border-black px-2 py-0.5 text-[9px] font-black uppercase hover:bg-[#4ADE80]/90 shadow-[1px_1px_0px_0px_rgba(0,0,0,1)] active:shadow-none active:translate-x-[1px] active:translate-y-[1px] cursor-pointer text-black"
+                                title="Log settlement payment"
+                              >
+                                SETTLE
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
               )}
             </div>
 
@@ -1468,6 +1548,152 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MODAL: VIEW EXPENSE (read-only) */}
+      {viewingExpense && (() => {
+        const expense = viewingExpense;
+        const payer = activeGroupMembers.find((m) => m.id === expense.paidById);
+        const categoryObj = CATEGORIES.find((c) => c.id === expense.category);
+        const splitLabel =
+          expense.splitType === 'equal'
+            ? 'Split Equally'
+            : expense.splitType === 'unequal'
+              ? 'Split Unequally (₹)'
+              : 'By Percentage (%)';
+        const splitMembers = expense.splitWithIds
+          .map((id) => activeGroupMembers.find((m) => m.id === id))
+          .filter((m): m is Member => Boolean(m));
+
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="w-full max-w-xl bg-white border-4 border-black p-5 sm:p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] text-black relative overflow-y-auto max-h-[92dvh] rounded-t-lg sm:rounded-none">
+              <button
+                type="button"
+                onClick={() => setViewingExpense(null)}
+                className="absolute top-4 right-4 p-1.5 bg-white border-2 border-black hover:bg-[#F472B6]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <h3 className="text-xl font-black mb-4 uppercase tracking-tight pr-10">
+                👁 View Expense Bill
+              </h3>
+
+              <div className="space-y-4 font-sans text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black block uppercase text-slate-500">Expense Title</label>
+                    <div className="w-full p-2.5 border-2 border-black bg-slate-50 text-sm font-bold text-black">
+                      {expense.title}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-black block uppercase text-slate-500">Total Amount (₹)</label>
+                    <div className="w-full p-2.5 border-2 border-black bg-slate-50 font-mono text-sm font-black text-black">
+                      ₹{expense.amount.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-black block uppercase text-slate-500">Who Paid?</label>
+                  <div className="w-full p-2.5 border-2 border-black bg-slate-50 text-sm font-bold text-black">
+                    {payer ? `${payer.avatarEmoji} ${payer.name}` : 'Unknown'}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black block uppercase text-slate-500">Category</label>
+                  <div className="inline-flex px-3 py-1.5 text-xs font-bold border-2 border-black bg-[#FDE047] items-center gap-1.5">
+                    <span>{categoryObj?.emoji || '🧾'}</span>
+                    <span>{categoryObj?.label || 'General'}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t border-black/10 pt-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <label className="text-xs font-black uppercase block text-slate-500">Split Strategy</label>
+                    <span className="px-2.5 py-1 text-[10px] font-black border-2 border-black bg-[#FDE047]">
+                      {splitLabel}
+                    </span>
+                  </div>
+
+                  <div className="p-3 bg-slate-50 border-2 border-black space-y-2">
+                    <div className="flex justify-between font-black text-[10px] text-slate-500 uppercase pb-1 border-b border-black/5">
+                      <span>Split Participants ({splitMembers.length})</span>
+                      <span>Share Amount</span>
+                    </div>
+
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                      {splitMembers.length === 0 ? (
+                        <p className="text-[11px] font-bold text-slate-500 text-center py-3 uppercase">No participants</p>
+                      ) : (
+                        splitMembers.map((m) => {
+                          const shareAmount = getMemberShareAmount(expense, m.id);
+                          const pct =
+                            expense.splitType === 'percentage'
+                              ? expense.shares[m.id] || 0
+                              : expense.amount > 0
+                                ? (shareAmount / expense.amount) * 100
+                                : 0;
+
+                          return (
+                            <div
+                              key={m.id}
+                              className="flex items-center justify-between gap-3 text-black p-2 border-2 border-black bg-white"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div
+                                  className="w-6 h-6 border-2 border-black flex items-center justify-center text-xs shrink-0"
+                                  style={{ backgroundColor: m.avatarBgColor }}
+                                >
+                                  {m.avatarEmoji}
+                                </div>
+                                <span className="font-bold text-xs truncate">{m.name}</span>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-mono font-black text-sm">₹{shareAmount.toFixed(2)}</div>
+                                {expense.splitType !== 'equal' && (
+                                  <div className="text-[10px] font-bold text-slate-500">
+                                    {expense.splitType === 'percentage'
+                                      ? `${pct.toFixed(1)}%`
+                                      : `${pct.toFixed(0)}% of total`}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const exp = viewingExpense;
+                      setViewingExpense(null);
+                      handleOpenEditExpense(exp);
+                    }}
+                    className="w-full py-3 bg-[#60A5FA] border-2 border-black font-black text-sm uppercase tracking-wider shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none cursor-pointer"
+                  >
+                    Edit This Bill
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewingExpense(null)}
+                    className="w-full py-3 bg-white border-2 border-black font-black text-sm uppercase tracking-wider shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MODAL: DATABASE BACKUPS & CONSOLE */}
       {showSettingsModal && (
