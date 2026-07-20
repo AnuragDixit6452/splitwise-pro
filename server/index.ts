@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -7,6 +8,11 @@ import { getState, initDb, putState, resetAndSeed, type LedgerState } from './db
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
+const distPath = path.join(__dirname, '..', 'dist');
+const indexHtml = path.join(distPath, 'index.html');
+
+let dbReady = false;
+let dbError: string | null = null;
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -25,6 +31,14 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+function requireDb(_req: Request, res: Response, next: NextFunction): void {
+  if (!dbReady) {
+    res.status(503).json({ error: dbError || 'Database is still starting. Retry in a few seconds.' });
+    return;
+  }
+  next();
+}
+
 function isLedgerState(body: unknown): body is LedgerState {
   if (!body || typeof body !== 'object') return false;
   const b = body as Record<string, unknown>;
@@ -36,11 +50,17 @@ function isLedgerState(body: unknown): body is LedgerState {
   );
 }
 
+// Always 200 once the process is listening — required for Render health checks.
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+  res.status(200).json({
+    ok: true,
+    dbReady,
+    dbError,
+    hasDist: fs.existsSync(indexHtml),
+  });
 });
 
-app.post('/api/auth/unlock', (req, res) => {
+app.post('/api/auth/unlock', requireDb, (req, res) => {
   const pin = typeof req.body?.pin === 'string' ? req.body.pin : '';
   if (pin !== getAppPin()) {
     res.status(401).json({ error: 'Invalid PIN' });
@@ -50,7 +70,7 @@ app.post('/api/auth/unlock', (req, res) => {
   res.json({ token, lastLoginAt: new Date().toISOString() });
 });
 
-app.get('/api/state', requireAuth, async (_req, res) => {
+app.get('/api/state', requireAuth, requireDb, async (_req, res) => {
   try {
     const state = await getState();
     res.json(state);
@@ -60,7 +80,7 @@ app.get('/api/state', requireAuth, async (_req, res) => {
   }
 });
 
-app.put('/api/state', requireAuth, async (req, res) => {
+app.put('/api/state', requireAuth, requireDb, async (req, res) => {
   if (!isLedgerState(req.body)) {
     res.status(400).json({ error: 'Invalid ledger payload' });
     return;
@@ -74,7 +94,7 @@ app.put('/api/state', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/reset', requireAuth, async (_req, res) => {
+app.post('/api/reset', requireAuth, requireDb, async (_req, res) => {
   try {
     const state = await resetAndSeed();
     res.json(state);
@@ -84,23 +104,68 @@ app.post('/api/reset', requireAuth, async (_req, res) => {
   }
 });
 
-const distPath = path.join(__dirname, '..', 'dist');
-app.use(express.static(distPath));
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath, { index: false }));
+}
+
+app.get('/', (_req, res) => {
+  if (!fs.existsSync(indexHtml)) {
+    res
+      .status(500)
+      .type('text')
+      .send('Frontend build missing (dist/index.html). Check the Docker build logs.');
+    return;
+  }
+  res.sendFile(indexHtml);
+});
+
 app.use((req, res, next) => {
   if (req.method !== 'GET' || req.path.startsWith('/api/')) {
     next();
     return;
   }
-  res.sendFile(path.join(distPath, 'index.html'), (err) => {
-    if (err) next();
-  });
+  if (!fs.existsSync(indexHtml)) {
+    res.status(404).type('text').send('Not Found');
+    return;
+  }
+  res.sendFile(indexHtml);
 });
 
+async function connectDbWithRetry(maxAttempts = 8): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      console.log(`Connecting to database (attempt ${attempt}/${maxAttempts})...`);
+      await initDb();
+      dbReady = true;
+      dbError = null;
+      console.log('Database ready.');
+      return;
+    } catch (err) {
+      dbReady = false;
+      dbError = err instanceof Error ? err.message : String(err);
+      console.error(`Database init failed (attempt ${attempt}):`, dbError);
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** (attempt - 1), 10000)));
+      }
+    }
+  }
+  console.error('Database still unavailable after retries. API routes will return 503 until it recovers.');
+}
+
 async function main(): Promise<void> {
-  await initDb();
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Splitwise Pro listening on http://0.0.0.0:${PORT}`);
+  console.log(`Starting Splitwise Pro on 0.0.0.0:${PORT}`);
+  console.log(`dist path: ${distPath} (index exists: ${fs.existsSync(indexHtml)})`);
+  console.log(`DATABASE_URL set: ${Boolean(process.env.DATABASE_URL)}`);
+
+  // Bind to PORT immediately so Render health checks / routing succeed.
+  await new Promise<void>((resolve) => {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Listening on http://0.0.0.0:${PORT}`);
+      resolve();
+    });
   });
+
+  void connectDbWithRetry();
 }
 
 main().catch((err) => {

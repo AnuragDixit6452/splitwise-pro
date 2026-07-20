@@ -15,5 +15,5 @@ RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY src/types.ts ./src/types.ts
-EXPOSE 3000
+EXPOSE 10000
 CMD ["npx", "tsx", "server/index.ts"]
