@@ -960,26 +960,32 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => setViewingExpense(exp)}
-                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#FDE047] hover:bg-[#FDE047]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                className="inline-flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 bg-white hover:bg-[#FDE047] border-2 border-black text-black transition-all cursor-pointer"
                                 title="View expense details"
+                                aria-label="View expense details"
                               >
-                                <Eye className="w-3.5 h-3.5" />
+                                <Eye className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                <span className="hidden sm:inline text-[9px] font-black uppercase tracking-wide">View</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditExpense(exp)}
-                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#60A5FA] hover:bg-[#60A5FA]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                className="inline-flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 bg-[#60A5FA] hover:bg-[#60A5FA]/90 border-2 border-black text-black transition-all cursor-pointer"
                                 title="Edit expense"
+                                aria-label="Edit expense"
                               >
-                                <Pencil className="w-3.5 h-3.5" />
+                                <Pencil className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                <span className="hidden sm:inline text-[9px] font-black uppercase tracking-wide">Edit</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteExpense(exp.id)}
-                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#F472B6] hover:bg-[#F472B6]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                className="inline-flex items-center gap-1 p-2 sm:px-2.5 sm:py-1.5 bg-[#F472B6] hover:bg-[#F472B6]/90 border-2 border-black text-black transition-all cursor-pointer"
                                 title="Delete bill record"
+                                aria-label="Delete expense"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3.5 h-3.5" strokeWidth={2.5} />
+                                <span className="hidden sm:inline text-[9px] font-black uppercase tracking-wide">Del</span>
                               </button>
                             </div>
                           </div>
