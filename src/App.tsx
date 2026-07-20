@@ -21,7 +21,8 @@ import {
   TrendingDown,
   TrendingUp,
   Receipt,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Pencil
 } from 'lucide-react';
 import { Group, Member, Expense, Settlement, Session } from './types';
 import { 
@@ -53,6 +54,7 @@ export default function App() {
   const [showAddGroupModal, setShowAddGroupModal] = useState(false);
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   // New entry states
@@ -252,22 +254,27 @@ export default function App() {
     showNotification("Member removed successfully.", "success");
   };
 
-  // Expense creation
+  // Expense creation / editing
+  const closeExpenseModal = () => {
+    setShowAddExpenseModal(false);
+    setEditingExpenseId(null);
+  };
+
   const handleOpenExpenseModal = () => {
     const activeGroupMembers = members.filter(m => m.groupId === activeGroupId);
     if (activeGroupMembers.length < 2) {
       showNotification("Please add at least 2 members to this group before logging expenses.", "error");
       return;
     }
-    
+
+    setEditingExpenseId(null);
     setExpenseTitle('');
     setExpenseAmount('');
     setExpenseCategory('general');
     setExpensePaidBy(activeGroupMembers[0].id);
     setExpenseSplitWith(activeGroupMembers.map(m => m.id));
     setExpenseSplitType('equal');
-    
-    // Reset unequal/percentage shares
+
     const initialShares: Record<string, number> = {};
     activeGroupMembers.forEach(m => {
       initialShares[m.id] = 0;
@@ -277,7 +284,30 @@ export default function App() {
     setShowAddExpenseModal(true);
   };
 
-  const handleCreateExpense = (e: React.FormEvent) => {
+  const handleOpenEditExpense = (expense: Expense) => {
+    const activeGroupMembers = members.filter(m => m.groupId === activeGroupId);
+    if (activeGroupMembers.length === 0) {
+      showNotification("No members available to edit this expense.", "error");
+      return;
+    }
+
+    setEditingExpenseId(expense.id);
+    setExpenseTitle(expense.title);
+    setExpenseAmount(String(expense.amount));
+    setExpenseCategory(expense.category);
+    setExpensePaidBy(expense.paidById);
+    setExpenseSplitWith([...expense.splitWithIds]);
+    setExpenseSplitType(expense.splitType);
+
+    const initialShares: Record<string, number> = {};
+    activeGroupMembers.forEach(m => {
+      initialShares[m.id] = expense.shares[m.id] ?? 0;
+    });
+    setExpenseShares(initialShares);
+    setShowAddExpenseModal(true);
+  };
+
+  const handleSaveExpense = (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(expenseAmount);
     if (!expenseTitle.trim() || isNaN(amount) || amount <= 0) {
@@ -290,7 +320,6 @@ export default function App() {
       return;
     }
 
-    // Validate unequal/percentage totals
     if (expenseSplitType === 'unequal') {
       const totalShares = expenseSplitWith.reduce((acc, mId) => acc + (expenseShares[mId] || 0), 0);
       if (Math.abs(totalShares - amount) > 0.05) {
@@ -303,6 +332,27 @@ export default function App() {
         showNotification(`The sum of percentages must equal exactly 100%. Currently it is ${totalPercentages}%.`, "error");
         return;
       }
+    }
+
+    if (editingExpenseId) {
+      const updatedExpenses = expenses.map((exp) =>
+        exp.id === editingExpenseId
+          ? {
+              ...exp,
+              title: expenseTitle.trim(),
+              amount,
+              paidById: expensePaidBy,
+              splitWithIds: expenseSplitWith,
+              splitType: expenseSplitType,
+              shares: expenseShares,
+              category: expenseCategory,
+            }
+          : exp,
+      );
+      void persistState(groups, members, updatedExpenses, activeGroupId);
+      closeExpenseModal();
+      showNotification(`Updated expense: ${expenseTitle.trim()} (₹${amount})`, 'success');
+      return;
     }
 
     const newExpense: Expense = {
@@ -321,7 +371,7 @@ export default function App() {
     const updatedExpenses = [...expenses, newExpense];
     void persistState(groups, members, updatedExpenses, activeGroupId);
 
-    setShowAddExpenseModal(false);
+    closeExpenseModal();
     showNotification(`Logged expense: ${newExpense.title} (₹${newExpense.amount})`, 'success');
   };
 
@@ -853,14 +903,24 @@ export default function App() {
                               </div>
                             </div>
 
-                            {/* Trash — always visible on touch devices */}
-                            <button
-                              onClick={() => handleDeleteExpense(exp.id)}
-                              className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#F472B6] hover:bg-[#F472B6]/90 border-2 border-black text-black transition-all cursor-pointer shrink-0"
-                              title="Delete bill record"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditExpense(exp)}
+                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#60A5FA] hover:bg-[#60A5FA]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                title="Edit expense"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteExpense(exp.id)}
+                                className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-2 sm:p-1.5 bg-[#F472B6] hover:bg-[#F472B6]/90 border-2 border-black text-black transition-all cursor-pointer"
+                                title="Delete bill record"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -1193,22 +1253,22 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL: NEW EXPENSE */}
+      {/* MODAL: NEW / EDIT EXPENSE */}
       {showAddExpenseModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full max-w-xl bg-white border-4 border-black p-5 sm:p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] text-black relative overflow-y-auto max-h-[92dvh] rounded-t-lg sm:rounded-none">
             <button
-              onClick={() => setShowAddExpenseModal(false)}
+              onClick={closeExpenseModal}
               className="absolute top-4 right-4 p-1.5 bg-white border-2 border-black hover:bg-[#F472B6]"
             >
               <X className="w-4 h-4" />
             </button>
             
-            <h3 className="text-xl font-black mb-4 uppercase tracking-tight">
-              🧾 Log Group Expense Bill
+            <h3 className="text-xl font-black mb-4 uppercase tracking-tight pr-10">
+              {editingExpenseId ? '✏️ Edit Expense Bill' : '🧾 Log Group Expense Bill'}
             </h3>
 
-            <form onSubmit={handleCreateExpense} className="space-y-4 font-sans text-xs">
+            <form onSubmit={handleSaveExpense} className="space-y-4 font-sans text-xs">
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
@@ -1402,7 +1462,7 @@ export default function App() {
                 type="submit"
                 className="w-full py-3 bg-[#FDE047] border-2 border-black font-black text-sm uppercase tracking-wider shadow-[3px_3px_0px_0px_rgba(0,0,0,1)] hover:translate-x-0.5 hover:translate-y-0.5 active:translate-x-[3px] active:translate-y-[3px] active:shadow-none cursor-pointer mt-4"
               >
-                Log Bill Item
+                {editingExpenseId ? 'Save Changes & Recalculate' : 'Log Bill Item'}
               </button>
             </form>
           </div>
