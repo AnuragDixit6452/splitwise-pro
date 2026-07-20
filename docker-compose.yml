@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Prefer Neon from .env; fall back to local compose db if unset
+      DATABASE_URL: ${DATABASE_URL:-postgres://dixit_user:secure_ledger_password@db:5432/expense_tracker}
+      APP_PIN: ${APP_PIN:-1495}
+      SESSION_SECRET: ${SESSION_SECRET:-local-dev-session-secret-change-me}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: dixit_user
+      POSTGRES_PASSWORD: secure_ledger_password
+      POSTGRES_DB: expense_tracker
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dixit_user -d expense_tracker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+    driver: local
